@@ -1,140 +1,160 @@
-Jellyfin Image Organization Tool
-================================
+# ☠ SHIPWRECK v1.0
 
-Purpose
--------
-This PowerShell-based GUI tool streamlines the process of organizing and integrating custom artwork for Jellyfin media servers. 
-It is particularly useful when sourcing images from platforms like Mediux, which may follow naming conventions for other platforms like Plex.
+> *In the real world, shipwrecks act as time capsules, preserving history at the bottom of the ocean. Shipwreck is about preservation - finding, downloading, and locally saving high-quality artwork so your Jellyfin library looks perfect, even if online metadata sites ever go down.*
 
-Problem Solved
---------------
-Manually downloading, extracting, renaming, and placing custom media artwork (posters, backdrops, episode thumbs) into 
-the correct Jellyfin directory structure can be a time-consuming and error-prone task. This tool automates those steps, 
-saving time and ensuring consistency.
+Shipwreck is a PowerShell GUI tool that renames and sorts media artwork downloaded from [Mediux](https://mediux.pro) into the correct folder structure for a [Jellyfin](https://jellyfin.org) media server.
 
-Core Functionality
-------------------
-The tool provides a user-friendly graphical interface with distinct steps to process your media artwork:
+![Shipwreck v1.0](assets/screenshots/shipwreck_preview.png)
 
-1. Source & Target Matching:
-   - Compares user-specified Source (e.g., D:\Downloads) and Target directories (e.g., Z:\Media\TV Shows).
-   - Identifies matches using the "Show Name (YYYY)" format.
-   - Only processes shows that exist in both source and target folders.
+---
 
-2. Automated Archive Extraction:
-   - Automatically extracts .zip, .rar, or .7z archives using 7-Zip (must be installed and in system PATH).
-   - Extracted contents are placed in a new subfolder within the source.
-   - Original archive is deleted with retry logic for file locks.
+## The Problem It Solves
 
-3. Intelligent Renaming (within Source Subfolders):
-   - Backdrops → renamed to `backdrop.jpg`
-   - Season Posters → renamed to `seasonXX-poster.jpg` or `season-specials-poster.jpg` (for Season 0)
-   - Folder Posters → renamed to `folder.jpg`
-   - Episode Thumbs:
-     - Matched using SXXEXX format and compared against target video files.
-     - Renamed to match the video’s base name with `-thumb` suffix (e.g., `S01E07 - Pinkeye-thumb.jpg`)
+Manually extracting, renaming, and placing custom media artwork - posters, backdrops, episode thumbnails - into the correct Jellyfin directory structure is slow and error-prone. Shipwreck automates everything after the download step, which remains the user's responsibility.
 
-   *Note: Episode thumbs are only renamed if matching video files are found.*
+Mediux also has naming quirks: it converts colons to hyphens and sometimes drops the space before them, producing filenames like `Dragon Ball Z- Fusion Reborn (1995).jpg` instead of `Dragon Ball Z - Fusion Reborn (1995).jpg`. Shipwreck corrects all of this automatically before anything touches your media library.
 
-4. Loose File Handling (Direct Move/Rename):
-   - Loose backdrop, season, and folder images in the main source folder are moved directly and renamed accordingly.
+### Source-First Processing
 
-5. Organized File Placement:
-   - Moves renamed files to the correct locations in the Jellyfin media structure (show root or season subfolders).
+All renaming and organizing happens on the **source folder side first** before a single file is written to your target. This is intentional. If you run Jellyfin on a NAS, an external drive, or any storage where write cycles matter, Shipwreck minimizes unnecessary writes by ensuring every file is correctly named and routed before it leaves the source. Nothing is written to your media library until it is ready and in its final form.
 
-6. Overwrite Behavior:
-   - All operations are configured to overwrite existing files of the same name. Backup your media if needed.
+### Single Lookup Per Operation
 
-7. Configuration Persistence:
-   - Saves source and target folder paths to a `MediaToolConfig.json` for future use.
+Shipwreck scans your target library directories exactly once per operation, regardless of how many steps you run. The result is cached and reused across all five steps. On large libraries spanning multiple drives, this makes a noticeable difference compared to tools that re-scan the library for every individual action.
 
-Workflow Example
-----------------
-1. Download custom artwork sets (e.g., from Mediux.pro) to your downloads folder (e.g., D:\Downloads).
-   - Examples: `South Park (1997).zip`, `Loki (2021) - Season 1.jpg`
+---
 
-2. Launch the "Jellyfin Image Organization Tool".
+## Features
 
-3. Set your Source Folder (e.g., D:\Downloads).
+| Step | Button | What it does |
+|------|--------|-------------|
+| 1 | Extract Archives | Matches `.zip/.rar/.7z` archives against your Jellyfin library and extracts them into named subfolders. Deletes the archive after successful extraction. |
+| 2 | Rename Backdrops | Renames `* - Backdrop.ext` files to `backdrop.ext`. Moves loose backdrops directly to the correct show folder. |
+| 3 | Rename Media Images | Renames season posters to `seasonXX-poster.ext`, Season 0 to `season-specials-poster.ext`, and show posters to `folder.ext`. |
+| 4 | Rename Episode Images | Matches episode thumbnails to their video filenames using `SxxExx` pattern matching and renames them to `VideoFilename-thumb.ext`. |
+| 5 | Move Images & Cleanup | Moves all processed images to the correct Jellyfin target folders. Cleans up empty source folders. |
+| - | Run All Steps (1-5) | Runs the full pipeline in one click. |
+| - | Swab the Poop Deck | Clears the log output. |
 
-4. Add one or more Target Folders (e.g., Z:\Media\TV Shows, X:\Movies).
+### Mediux Filename Normalization
 
-5. Use step-by-step buttons or the "Run All Steps" button.
+Shipwreck uses a three-tier cascading match system to handle Mediux naming quirks:
 
-6. The tool will:
-   - Extract `South Park (1997).zip`
-   - Rename images in the extracted folder
-   - Match and rename episode thumbs based on Jellyfin’s existing files
-   - Move images to the correct folders
-   - Process any loose images like `Loki (2021) - Season 1.jpg` into the right show folder
+- **Tier 1** - Exact match
+- **Tier 2** - Spacing fix (`Dragon Ball Z- Fusion Reborn` -> `Dragon Ball Z - Fusion Reborn`)
+- **Tier 3** - Loose match, strips hyphens and colons from both sides (`Fullmetal Alchemist- Brotherhood` -> `Fullmetal Alchemist Brotherhood`)
 
-7. Result: Jellyfin-compatible images ready for library scanning.
+Each tier that fires is logged so you can always verify a match was correct.
 
-Requirements
-------------
-- Windows OS
-- PowerShell 5.1 or newer
-- .NET Framework 4.5 or newer
-- 7-Zip installed and `7z.exe` added to your system PATH
+---
 
-Installation & Usage
---------------------
-1. Download the script
-   
-3. Ensure 7-Zip is installed and `7z.exe` is in your system PATH.
+## Requirements
 
-4. To create a shortcut for easy use:
-   - Right-click your Desktop or any folder → New → Shortcut
-   - For the location, enter:
-     powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Jellyfin_Image_Organizer_Tool.ps1"
-   - Replace with the actual full path to the script
-   - Name the shortcut (e.g., Jellyfin Image Tool), then click Finish
+- **Windows OS**
+- **PowerShell 5.1+**
+- **.NET Framework 4.5+**
+- **[7-Zip](https://www.7-zip.org/)** - required for archive extraction only. `7z.exe` must be in your system PATH.
 
-5. To run manually from PowerShell (recommended for GUI scripts):
-   powershell -Sta -File "C:\Path\To\Jellyfin_Image_Organizer_Tool.ps1"
+---
 
-Adding 7-Zip to your System PATH
---------------------
-To ensure 7z.exe is in your system path, you need to add the directory containing it to your PATH environment variable. This allows your operating system to find and execute the 7z command from the command line or other applications. 
-Here's how to do it:
+## Folder Structure
 
-  1. Install 7-Zip:
-    If you don't have it already, download and install 7-Zip from the official 7-Zip website. 
+```
+Shipwreck/
+    Shipwreck.ps1
+    manifest.json               <- auto-generated on first run (saves your source/target paths)
+    shipwreck.log               <- auto-generated, saves full log output on close
+    assets/
+        Shipwreck_Badge.ico
+        close.ico
+        minimize.ico
+        maximize.ico
+        Porto_Buena.otf
+        screenshots/
+            shipwreck_preview.png
+```
 
-  2. Locate the 7-Zip directory:
-  Find the directory where 7-Zip is installed. By default, it's usually C:\Program Files\7-Zip.
- 
-  4. Edit environment variables:
-  Windows 10/11: Search for "environment variables" in the Start Menu and click "Edit the system environment variables". 
+---
 
-  Older Windows versions: Right-click on "My Computer" (or "This PC") and select "Properties." Then, click on "Advanced system settings" and then the "Environment Variables" button. 
+## Setup & Usage
 
-  5. Find the PATH variable:
-  In the "System variables" section (or "User variables" if you're only modifying it for your user), find the "Path" variable.
+**1. Run the script**
+```powershell
+powershell -Sta -File "Shipwreck.ps1"
+```
 
-  6. Edit the PATH:
-  Click "Edit" and then click "New" to add a new path. 
-  
-  7. Add the 7-Zip directory:
-  Enter the full path to the 7-Zip directory (e.g., C:\Program Files\7-Zip). 
+Or create a desktop shortcut with this target:
+```
+powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -Sta -File "C:\Path\To\Shipwreck.ps1"
+```
 
-  8. Confirm and restart:
-  Click "OK" on all the windows to save the changes. You may need to restart your command prompt or the application where you're using 7-Zip for the changes to take effect. 
-  
-  9. Verify:
-  Open a new command prompt and type 7z. If the folder was added correctly, you should see the 7-Zip usage information.
+**2. Set your Source Folder**
 
-Supported File Types
---------------------
-.jpg, .jpeg, .png are the supported image types
-.mkv, .mp4, .avi, .mov, .mpg are the supported video types
+Where your Mediux downloads land (e.g. `F:\Downloads`).
 
-If your image files are not one of the above supported types, the tool will NOT see them.
-If your video type is not listed above, then the corresponding image will NOT match the video file, resulting in it being skipped.
+**3. Add your Target Folders**
 
-Disclaimer
-----------
-This tool performs file operations including deletion and overwriting. While tested extensively, you should **back up**
-your source and target media directories before using the tool, especially on first use.
+Your Jellyfin media library roots (e.g. `T:\Anime`, `T:\Movies`, `T:\TV`). Add as many as you need - Shipwreck searches all of them in a single scan.
 
-The author is not responsible for any data loss or misfiled content.
+**4. Run All Steps or step through individually**
+
+Your source and target paths are saved automatically to `manifest.json` for future runs.
+
+---
+
+## Workflow Example
+
+The user downloads artwork from Mediux manually and places it in their source folder:
+
+```
+Downloads/
+    South Park (1997).zip
+    Loki (2021) - Season 1.jpg
+```
+
+After running all steps:
+- `South Park (1997).zip` is extracted and all images are renamed within the source folder
+- Season posters are renamed to `season01-poster.jpg` before being moved
+- Episode thumbs are matched to video filenames and renamed before being moved to the correct season subfolder
+- `Loki (2021) - Season 1.jpg` is moved directly to `T:\TV\Loki (2021)\season01-poster.jpg`
+- Empty source subfolders are deleted once all files have been moved
+
+Nothing is written to your media library until each file is fully processed and in its final form.
+
+---
+
+## Supported File Types
+
+| Type | Extensions |
+|------|-----------|
+| Images | `.jpg` `.jpeg` `.png` `.webp` |
+| Video (for episode matching) | `.mkv` `.mp4` `.avi` `.mov` `.mpg` `.ts` |
+
+> Files not matching these extensions will be ignored by the tool.
+
+---
+
+## Adding 7-Zip to Your System PATH
+
+1. Download and install [7-Zip](https://www.7-zip.org/)
+2. Open **Start** -> search **"Edit the system environment variables"**
+3. Click **Environment Variables**
+4. Under **System variables**, find and select **Path** -> click **Edit**
+5. Click **New** and add `C:\Program Files\7-Zip`
+6. Click OK on all windows and restart any open terminals
+7. Verify by opening a new PowerShell window and typing `7z` - you should see 7-Zip usage info
+
+---
+
+## Notes
+
+- Shipwreck **overwrites** existing artwork files by design - this is intentional for updating stale posters
+- Back up your media library before first use if you want to be safe
+- Episode thumbnails are only renamed if a matching video file is found in the target. Unmatched images are flagged in the log as *adrift at sea*
+- The `manifest.json` config file saves in the same directory as the script
+
+---
+
+## Disclaimer
+
+This tool performs file operations including deletion and overwriting. While tested extensively, you should back up your source and target directories before use, especially on first run. The author is not responsible for any data loss or misfiled content.
