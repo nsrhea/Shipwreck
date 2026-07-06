@@ -28,6 +28,13 @@ Backup your data before extensive use! Overwriting is enabled.
 
 --- Changelog ---
 
+2026-07-04 — v1.1
+- Feature: Tier 4 substring match added to Find-TargetShowMatch. Handles Sonarr/Radarr
+  folders that embed TVDB/TMDB IDs in any position, e.g. "Game of Thrones (2011) {tvdb-121361}"
+  or "Game of Thrones {tvdb-121361} (2011)". The source show name and year must both be present
+  in the target folder name for the match to fire. Year must match exactly to prevent
+  cross-show collisions. Logs as "Substring match (ID tag ignored)" in cyan.
+
 2026-07-02 — v1.0 (Project renamed: Shipwreck)
 - Rebranded project as "Shipwreck". In the real world, shipwrecks act as time capsules,
   preserving history at the bottom of the ocean. This tool is about preservation — finding,
@@ -41,7 +48,7 @@ Backup your data before extensive use! Overwriting is enabled.
 - Straggler detection: files that remain in the source folder after a move step (no matching
   video found) are flagged as "adrift at sea" in the log.
 
-2026-06-28
+2026-07-02 — v1.0 (Project renamed: Shipwreck)
 - Fix: Episode thumbnails now route to the exact season folder the video file lives in,
   rather than scanning folder names and potentially matching the wrong folder (e.g. routing
   to a stale "Season 01" instead of the correct "Season 1"). Rename-EpisodeImages now records
@@ -89,6 +96,14 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Hide the PowerShell console window immediately — WPF re-shows it during init
+# so -WindowStyle Hidden alone is not sufficient for WPF scripts
+Add-Type -Name ConsoleHider -Namespace Shipwreck -MemberDefinition '
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")]   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+'
+[Shipwreck.ConsoleHider]::ShowWindow([Shipwreck.ConsoleHider]::GetConsoleWindow(), 0) | Out-Null
+
 # Path for storing configuration (Source/Target folders)
 # Uses the script's directory for the config file, or PWD if run interactively.
 $scriptPath = $MyInvocation.MyCommand.Path
@@ -105,7 +120,7 @@ $ConfigFilePath = Join-Path $scriptDir "manifest.json"
 $LogFilePath    = Join-Path $scriptDir "shipwreck.log"
 
 # --- Version ---
-$script:AppVersion = "v1.0"
+$script:AppVersion = "v1.1"
 
 
 # --- Global Variables ---
@@ -188,14 +203,20 @@ function Get-NormalizedShowName {
     return ($Name -replace '(\S)-\s', '$1 - ')
 }
 
-# Three-tier cascading match against the target show folder map.
-# Returns @{ Path; MatchType = "exact"|"normalized"|"loose"; MatchedKey } or $null.
+# Four-tier cascading match against the target show folder map.
+# Returns @{ Path; MatchType = "exact"|"normalized"|"loose"|"substring"; MatchedKey } or $null.
 #
 # Tier 1 — Exact: direct hashtable lookup (map stores both actual and pre-normalized keys).
 # Tier 2 — Normalized: apply Get-NormalizedShowName (fixes Mediux missing-space-before-hyphen).
 # Tier 3 — Loose: strip all hyphens/colons from both sides and compare. Handles cases like
 #           "Fullmetal Alchemist- Brotherhood (2009)" vs "Fullmetal Alchemist Brotherhood (2009)"
 #           where Mediux inserts a hyphen that doesn't exist in the Jellyfin folder name at all.
+# Tier 4 — Substring: extracts the show name and year from the source, then checks whether any
+#           target folder key contains BOTH. Order of name vs year doesn't matter, so this handles
+#           Sonarr/Radarr folders with embedded TVDB/TMDB IDs in any position, e.g.:
+#             "Game of Thrones (2011) {tvdb-121361}"
+#             "Game of Thrones {tvdb-121361} (2011)"
+#           The year must match exactly to prevent cross-show collisions.
 function Find-TargetShowMatch {
     param(
         [string]$SourceName,
@@ -222,11 +243,27 @@ function Find-TargetShowMatch {
         }
     }
 
+    # Tier 4: substring match — for Sonarr/Radarr folders that embed TVDB/TMDB IDs.
+    # Extracts the show name portion and year portion from the source name separately,
+    # then checks that any target folder key contains BOTH, in any order.
+    # The year must be present and correct to prevent false matches between similarly named shows.
+    if ($SourceName -match '^(.+?)\s*(\(\d{4}\))') {
+        $sourceTitlePart = $matches[1].Trim()
+        $sourceYearPart  = $matches[2].Trim()  # e.g. "(2011)"
+        foreach ($key in $TargetMap.Keys) {
+            $keyContainsTitle = $key -like "*$sourceTitlePart*"
+            $keyContainsYear  = $key -like "*$sourceYearPart*"
+            if ($keyContainsTitle -and $keyContainsYear) {
+                return @{ Path = $TargetMap[$key]; MatchType = "substring"; MatchedKey = $key }
+            }
+        }
+    }
+
     return $null
 }
 
 # Logs which match tier fired. Exact matches are silent (normal flow).
-# Normalized and loose matches log a note so the user can verify correctness.
+# All other tiers log a note so the user can verify the match was correct.
 function Write-MatchLog {
     param(
         [string]$SourceName,
@@ -238,6 +275,9 @@ function Write-MatchLog {
         }
         "loose" {
             Add-LogEntry "   ↳ Loose match (punctuation ignored): '$SourceName' -> '$($MatchResult.MatchedKey)'" -ColorInput ([System.Drawing.Color]::Goldenrod)
+        }
+        "substring" {
+            Add-LogEntry "   ↳ Substring match (ID tag ignored): '$SourceName' -> '$($MatchResult.MatchedKey)'" -ColorInput ([System.Drawing.Color]::DarkCyan)
         }
     }
 }
